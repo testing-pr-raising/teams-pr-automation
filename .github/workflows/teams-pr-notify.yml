@@ -1,0 +1,77 @@
+# Reusable workflow: post a PR notification to a Microsoft Teams webhook.
+# Central reusable workflow. Called from every project in the testing-pr-raising org.
+# Teams side: channel/chat -> Workflows -> "Post to a channel/chat when a webhook request is received".
+name: Teams PR notify (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      base_branches:
+        description: 'JSON array of target branches to notify for'
+        type: string
+        default: '["develop"]'
+      title_prefix:
+        description: 'Project title shown on the card (defaults to the repo name)'
+        type: string
+        default: ''
+      mention_text:
+        description: 'Optional extra line in the card (e.g. "@reviewers")'
+        type: string
+        default: ''
+      default_mentions:
+        description: 'JSON array of GitHub logins always tagged (e.g. ["octocat"])'
+        type: string
+        default: '[]'
+    secrets:
+      TEAMS_WEBHOOK_URL:
+        required: true
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    if: contains(fromJSON(inputs.base_branches), github.base_ref)
+    steps:
+      - name: Send Teams card
+        env:
+          WEBHOOK: ${{ secrets.TEAMS_WEBHOOK_URL }}
+          # Passed via env, never inlined in the script: PR titles are untrusted input.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
+          REPO: ${{ github.repository }}
+          PREFIX: ${{ inputs.title_prefix }}
+          EXTRA: ${{ inputs.mention_text }}
+          REVIEWERS: ${{ toJSON(github.event.pull_request.requested_reviewers.*.login) }}
+          DEFAULTS: ${{ inputs.default_mentions }}
+          # Repo/org variable, e.g. {"octocat":{"name":"Jane Doe","email":"jane@corp.com"}}
+          # Kept out of git so emails are not public.
+          USER_MAP: ${{ vars.TEAMS_USER_MAP || '{}' }}
+        run: |
+          [ "$PR_DRAFT" = "true" ] && { echo "draft PR, skip"; exit 0; }
+          payload=$(jq -n \
+            --arg project "${PREFIX:-$REPO}" --arg desc "$PR_TITLE" \
+            --arg author "$PR_AUTHOR" \
+            --arg extra "$EXTRA" --arg url "$PR_URL" \
+            --argjson map "$USER_MAP" --argjson rev "$REVIEWERS" --argjson def "$DEFAULTS" '
+            ($map[$author].name // $author) as $who |
+            # tag only logins found in the map (need a Teams email to mention)
+            ([$rev[], $def[]] | unique | map(select($map[.] != null)) | map($map[.])) as $tags |
+            {type:"message", attachments:[{
+              contentType:"application/vnd.microsoft.card.adaptive", contentUrl:null,
+              content:{
+                "$schema":"http://adaptivecards.io/schemas/adaptive-card.json",
+                type:"AdaptiveCard", version:"1.4",
+                body:([
+                  {type:"TextBlock", size:"Medium", weight:"Bolder", wrap:true, text:("Project: " + $project)},
+                  {type:"TextBlock", wrap:true, text:("**Change:** " + $desc)},
+                  {type:"TextBlock", wrap:true, spacing:"None", text:("**Raised by:** " + $who)}
+                ]
+                + (if $extra == "" then [] else [{type:"TextBlock", wrap:true, text:$extra}] end)
+                + (if ($tags|length) == 0 then [] else
+                    [{type:"TextBlock", wrap:true, spacing:"None", text:("**Review:** " + ($tags | map("<at>\(.name)</at>") | join(", ")))}] end)),
+                actions:[{type:"Action.OpenUrl", title:"Open PR", url:$url}],
+                msteams:{entities:($tags | map({type:"mention", text:"<at>\(.name)</at>", mentioned:{id:.email, name:.name}}))}
+              }}]}')
+          curl -fsS --retry 3 -X POST -H 'Content-Type: application/json' -d "$payload" "$WEBHOOK"
