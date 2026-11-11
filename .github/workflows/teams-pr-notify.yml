@@ -70,7 +70,7 @@ jobs:
                 ]
                 + (if $extra == "" then [] else [{type:"TextBlock", wrap:true, text:$extra}] end)
                 + (if ($tags|length) == 0 then [] else
-                    [{type:"TextBlock", wrap:true, spacing:"None", text:("**Review:** " + ($tags | map("<at>\(.name)</at>") | join(", ")))}] end)),
+                    [{type:"TextBlock", wrap:true, spacing:"None", text:("**Review:** " + ($tags | map("@<at>\(.name)</at>") | join(", ")))}] end)),
                 actions:[{type:"Action.OpenUrl", title:"Open PR", url:$url}],
                 msteams:{entities:($tags | map({type:"mention", text:"<at>\(.name)</at>", mentioned:{id:.email, name:.name}}))}
               }}]}')
