@@ -65,12 +65,12 @@ jobs:
                 type:"AdaptiveCard", version:"1.4",
                 body:([
                   {type:"TextBlock", size:"Medium", weight:"Bolder", wrap:true, text:("Project: " + $project)},
-                  {type:"TextBlock", wrap:true, text:("**Change:** " + $desc)},
+                  {type:"TextBlock", wrap:true, spacing:"None", text:("**Change:** " + $desc)},
                   {type:"TextBlock", wrap:true, spacing:"None", text:("**Raised by:** " + $who)}
                 ]
                 + (if $extra == "" then [] else [{type:"TextBlock", wrap:true, text:$extra}] end)
                 + (if ($tags|length) == 0 then [] else
-                    [{type:"TextBlock", wrap:true, spacing:"None", text:("**Review:** " + ($tags | map("@<at>\(.name)</at>") | join(", ")))}] end)),
+                    [{type:"TextBlock", wrap:true, spacing:"None", text:("**Reviewer:** " + ($tags | map("<at>\(.name)</at>") | join(", ")))}] end)),
                 actions:[{type:"Action.OpenUrl", title:"Open PR", url:$url}],
                 msteams:{entities:($tags | map({type:"mention", text:"<at>\(.name)</at>", mentioned:{id:.email, name:.name}}))}
               }}]}')
